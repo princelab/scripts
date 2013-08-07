@@ -1,5 +1,10 @@
 #!/usr/bin/env ruby
 
+# JTP notes:
+# An example of how to quickly parse an OBO file
+# This should probably be compared for accuracy and performance against the
+# obo gem and used to improve that gem, if necessary
+
 require 'set'
 require 'obo'
 
