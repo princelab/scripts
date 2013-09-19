@@ -2,7 +2,6 @@
 
 require 'optparse'
 require 'ostruct'
-require_relative "../script/pubmed_to_bibtex"
 
 begin
   require 'bio'
