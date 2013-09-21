@@ -63,8 +63,9 @@ def putsv(*args)
 end
 
 $DRY = false
-opt = { }
-opts = OptionParser.new do |op|
+opt = OpentStruct.new(biber: true)
+
+parser = OptionParser.new do |op|
   op.banner = "usage: #{File.basename(__FILE__)} [OPTS] <file>.tex"
   op.separator "output: <file>.pdf"
   op.separator ""
@@ -78,19 +79,19 @@ opts = OptionParser.new do |op|
   op.separator "note: stalls if there are errors -- check <file>.log or .log{1-3}"
   op.separator ""
   op.separator "opts:"
-  op.on("--latex-verbose", "spit out latex messages") {|v| opt[:latex_verbose] = v }
-  op.on("--no-delete-pdf", "don't delete the pdf file before") {|v| opt[:no_delete_pdf] = v }
+  op.on("--latex-verbose", "spit out latex messages") {|v| opt.latex_verbose = v }
+  op.on("--no-delete-pdf", "don't delete the pdf file before") {|v| opt.no_delete_pdf = v }
   op.on("-v", "--verbose", "what is happening") {|v| $VERBOSE = 3 }
   op.on("--finished", "just tell me when finished") {|v| $FINISHED = true }
-  op.on("--dirty", "leave auxiliary files") {|v| opt[:dirty] = v }
-  op.on("--delete", "just delete auxiliary files") {|v| opt[:delete] = v }
-  op.on("--dry", "don't run anything, but be verbose") {|v| $DRY = true ; $VERBOSE = 3 }
-  op.on("--env", "print env variable export line and exit") {|v| opt[:env] = v }
+  op.on("--dirty", "leave auxiliary files") {|v| opt.dirty = v }
+  op.on("--delete", "just delete auxiliary files") {|v| opt.delete = v }
+  op.on("--dry", "don't run anything") {|v| $DRY = v ; $VERBOSE = 3 }
+  op.on("--bibtex", "use bibtex instead of biber") {|v| opt.biber = false }
+  op.on("--env", "print env variable export line and exit") {|v| opt.env = v }
 end
-opts.parse!
-opt = OpenStruct.new(opt)
+parser.parse!
 
-if opt[:env]
+if opt.env
   puts ENV_VARS.map {|k,v| "export #{k}=#{v}" }.join("; ")
   exit
 end
@@ -99,7 +100,6 @@ if ARGV.size == 0
   puts opts
   exit
 end
-
 
 
 file = ARGV.shift
