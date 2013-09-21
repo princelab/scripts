@@ -14,6 +14,11 @@ require 'shellwords'
 require 'optparse'
 require 'ostruct'
 
+ENV_VARS = {
+  'TEXMFHOME' => 'texmf',
+  'BSTINPUTS' => 'texmf/tex/bibtex/bib',
+}
+
 AUX_EXTS = %w(.bbl .blg .log .aux .out .toc -blx.bib .bcf .run.xml)
 
 # bastardize the string class for easy file manipulation
@@ -79,15 +84,23 @@ opts = OptionParser.new do |op|
   op.on("--finished", "just tell me when finished") {|v| $FINISHED = true }
   op.on("--dirty", "leave auxiliary files") {|v| opt[:dirty] = v }
   op.on("--delete", "just delete auxiliary files") {|v| opt[:delete] = v }
-  op.on("--dry", "don't run anything") {|v| opt[:dry] = $DRY = true }
+  op.on("--dry", "don't run anything, but be verbose") {|v| $DRY = true ; $VERBOSE = 3 }
+  op.on("--env", "print env variable export line and exit") {|v| opt[:env] = v }
 end
 opts.parse!
 opt = OpenStruct.new(opt)
+
+if opt[:env]
+  puts ENV_VARS.map {|k,v| "export #{k}=#{v}" }.join("; ")
+  exit
+end
 
 if ARGV.size == 0
   puts opts
   exit
 end
+
+
 
 file = ARGV.shift
 
@@ -96,13 +109,9 @@ quiet = opt.latex_verbose ? nil : ">/dev/null 2>&1"
 latexdir = File.expand_path(File.dirname(file))
 putsv "changing to #{latexdir}"
 
-unless $DRY
-  ENV['TEXMFHOME'] = 'texmf'
-  ENV['BSTINPUTS'] = 'texmf/tex/bibtex/bib'
-end
-if $VERBOSE
-  puts "export TEXMFHOME=texmf"
-  puts "export BSTINPUTS=texmf/tex/bibtex/bib"
+ENV_VARS.each do |key, val|
+  ENV[key] = val unless $DRY
+  puts "export #{key}=#{val}" if $VERBOSE
 end
 
 Dir.chdir(latexdir) do |latexdir|

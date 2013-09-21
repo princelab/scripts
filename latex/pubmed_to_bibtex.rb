@@ -38,6 +38,17 @@ def bib_append(file=nil, &block)
   end
 end
 
+# returns nil if can't make a decent label
+def label_from_reference(ref)
+  if ref.authors.empty?.!
+    first_author_last_name = ref.authors.first.split(",").first
+    first_author_last_name + ref.year.to_s
+  elsif ref.title
+    three_word_title = ref.title.split(/\s+/)[0,3].map(&:capitalize).join.tr('^A-Za-z0-9', '')
+    three_word_title + ref.year.to_s
+  end
+end
+
 opt = OpenStruct.new
 parser = OptionParser.new do |op|
   op.banner = "usage: #{File.basename(__FILE__)} <pubmed ID> ..." 
@@ -69,8 +80,7 @@ def entries_to_bibtexs(pmids, default_label: nil, abstract: false, pmid_label: f
 
     extra = {}
     unless label
-      first_author_last_name = reference.authors.first.split(",").first
-      label = first_author_last_name + reference.year
+      label = label_from_reference(reference)
     end
     label = nil if pmid_label
 
