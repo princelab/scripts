@@ -59,6 +59,7 @@ parser = OptionParser.new do |op|
   op.on("-b", "--bib-append", "append to the first .bib file found in pwd") {|v| opt.bib_append = v }
   op.on("-a", "--abstract", "include the abstract") {|v| opt.abstract = v }
   op.on("-l", "--label <String>", "use the specified label") {|v| opt.label = v }
+  op.on("-q", "--quiet-label", "don't print each label to stderr") {|v| opt.quiet_label = v }
   op.on("--pmid-label", "use PMID as label (overrides -l)") {|v| opt.pmid_label = v }
 end
 parser.parse!
@@ -109,6 +110,9 @@ if __FILE__ == $0
   bib_append(bibfile) do
     (labels, bibtexs) = entries_to_bibtexs(pmids)
     labels.zip(bibtexs) do |label, bibtex|
+      $stderr.puts(label) unless opt.quiet_label
+      # copy the label to clipboard (may depend on a previous running instance of xclip for persistence)
+      %w{clipboard primary}.each {|reg| system %Q{echo -n #{label} | xclip -selection #{reg} } }
       puts
       puts bibtex
     end
