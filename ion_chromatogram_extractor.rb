@@ -43,23 +43,35 @@ def multiplot(io, num_rows, num_cols, &block)
   io << "unset multiplot\n"
 end
 
+def ensure_extension(filename, ext)
+  File.extname(filename) == '' ? filename + ext : filename
+end
+
 
 opt = OpenStruct.new
 parser = OptionParser.new do |op|
   op.banner = "usage: #{File.basename(__FILE__)} <file>.mzML ..."
   op.separator "plots to screen"
-  op.on("-o", "--outfile <file>", "writes an svg") {|v| opt.outfile = v }
-  op.on("-n", "--no_zeros", "remove zero values") {|v| opt.no_zeros = v }
   op.on("-m", "--mz-ranges <s:e,...>", "start:end,start:end,... ") do |v| 
     opt.mz_ranges = v.split(',').map {|se_st| Range.new( *se_st.split(':').map(&:to_f) ) }
   end
+  op.on("--screen", "plot to screen") {|v| opt.screen = v }
+  op.on("-s", "--svg-outfile <file>", "writes a plot as svg") {|v| opt.svg_outfile = v }
+  op.on("-t", "--tsv-outfile <file>", "writes data to tsv file") {|v| opt.tsv_outfile = v }
+  op.on("-n", "--no_zeros", "remove zero values") {|v| opt.no_zeros = v }
 end
 parser.parse!
+
 
 if ARGV.size == 0
   puts parser
   exit
+elsif !opt.mz_ranges
+  abort "need at least one mz range (-m)"
+elsif !(opt.svg_outfile || opt.tsv_outfile || opt.screen)
+  abort "need either --screen || --svg-outfile || --tsv-outfile" 
 end
+
 
 data = ARGV.each_with_object({}) do |file, data|
   range_to_ec = Hash[ opt.mz_ranges.map {|range| [range, ExtractedChromatogram.new] } ]
@@ -82,15 +94,6 @@ data = ARGV.each_with_object({}) do |file, data|
   data[file] = range_to_ec
 end
 
-outfile = 
-  if opt.outfile
-    if File.extname(opt.outfile) == ''
-      opt.outfile + ".svg"
-    else
-      opt.outfile
-    end
-  end
-
 num_cols = data[data.keys.first].size
 num_rows = data.size
 
@@ -101,31 +104,51 @@ def plotheight(num_rows)
   num_rows * 300
 end
 
-#File.open("tmp.gnuplot.txt", 'w') do |gp|
-Gnuplot.open do |gp|
-  if outfile
-    gp << "set term svg enhanced mouse size #{plotwidth(num_cols)},#{plotheight(num_rows)}\n"
-    gp << %Q{set output "#{outfile}"\n}
-  end
-  multiplot(gp, num_rows, num_cols) do
+if opt.tsv_outfile
+  tsv_outfile = ensure_extension(opt.tsv_outfile, ".tsv")
+  File.open(tsv_outfile, 'w') do |out|
     data.each do |filename, ec_to_range|
+      basename = File.basename(filename)
       ec_to_range.each do |range, ec|
-        Gnuplot::Plot.new( gp ) do |plot|
-          plot.title "#{File.basename(filename)}:#{range}"
-          plot.xlabel "time (s)"
-          plot.ylabel "intensity"
-          plot.y2label "m/z"
-          plot.data << Gnuplot::DataSet.new( ec.ion_chromatogram ) do |ds|
-            ds.axes = "x1y1"
-            ds.with = "lines"
-            ds.title = "ion intensity"
-          end
-          plot.data << Gnuplot::DataSet.new( ec.mz_view_chromatogram) do |ds|
-            ds.axes = "x1y2"
-            ds.title = "m/z"
-          end
+        out.puts [basename, range].join(":")
+        (times, intensities) = ec.ion_chromatogram
+        (times, mzs) = ec.mz_view_chromatogram
+        [times, intensities, mzs].each do |data|
+          out.puts data.join("\t")
         end
-        gp << "\n"
+      end
+    end
+  end
+end
+
+if opt.screen || opt.svg_outfile
+  #File.open("tmp.gnuplot.txt", 'w') do |gp|
+  Gnuplot.open do |gp|
+    if opt.svg_outfile
+      svg_outfile = ensure_extension(opt.svg_outfile, ".svg")
+      gp << "set term svg enhanced size #{plotwidth(num_cols)},#{plotheight(num_rows)}\n"
+      gp << %Q{set output "#{svg_outfile}"\n}
+    end
+    multiplot(gp, num_rows, num_cols) do
+      data.each do |filename, ec_to_range|
+        ec_to_range.each do |range, ec|
+          Gnuplot::Plot.new( gp ) do |plot|
+            plot.title "#{File.basename(filename)}:#{range}"
+            plot.xlabel "time (s)"
+            plot.ylabel "intensity"
+            plot.y2label "m/z"
+            plot.data << Gnuplot::DataSet.new( ec.ion_chromatogram ) do |ds|
+              ds.axes = "x1y1"
+              ds.with = "lines"
+              ds.title = "ion intensity"
+            end
+            plot.data << Gnuplot::DataSet.new( ec.mz_view_chromatogram) do |ds|
+              ds.axes = "x1y2"
+              ds.title = "m/z"
+            end
+          end
+          gp << "\n"
+        end
       end
     end
   end
