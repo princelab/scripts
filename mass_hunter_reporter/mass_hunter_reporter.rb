@@ -168,8 +168,9 @@ module MassHunterReporter
     end
 
     def default_outfile
-      base = @sample.orig_filename.chomp(File.extname(@sample.orig_filename))
-      base + ".csv"
+	  @sample.analysis_file_name + ".report.csv"
+      #base = @sample.orig_filename.chomp(File.extname(@sample.orig_filename))
+      #base + ".csv"
     end
 
     # creates a header given the attribute name and the transform or given
