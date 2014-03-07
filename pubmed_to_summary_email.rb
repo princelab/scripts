@@ -13,6 +13,13 @@ rescue
   puts "(or) %   sudo gem install bio"
 end
 
+class String
+  # html escape
+  def html_esc
+    CGI.escapeHTML(self)
+  end
+end
+
 Bio::NCBI.default_email = "abc@efg.com"
 
 opt = OpenStruct.new(abstract: true, browser: true)
@@ -46,9 +53,9 @@ if __FILE__ == $0
   lines = [] 
   lines << ""
   medline_entries.each do |entry|
-    lines << " <b>#{entry.title}</b> <i>#{entry.journal}</i>. #{prep_authors(entry.authors)}"
+    lines << " <b>#{entry.title.html_esc}</b> <i>#{entry.journal.html_esc}</i>. #{prep_authors(entry.authors).html_esc}"
     lines << "<br/>[pubmed](#{pubmed_base_url+entry.pmid})"
-    lines << "" << entry.ab if opt.abstract
+    lines << "" << entry.ab.html_esc if opt.abstract
     lines << ""
   end
 
