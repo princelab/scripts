@@ -35,7 +35,11 @@ class ExtractedChromatogram
   attr_accessor :mz_range
   attr_accessor :time_range
 
+  # if set to a value, transform the color by that log base
+  attr_accessor :color_log_base
+
   def initialize(filename, window, centroids=[])
+    @color_log_base = nil
     @filename, @window, @centroids = filename, window, centroids
   end
 
@@ -93,14 +97,14 @@ class ExtractedChromatogram
   def mz_view_chromatogram
     [times, mzs]
   end
-end
 
-def ensure_extension(filename, ext)
-  File.extname(filename) == '' ? filename + ext : filename
-end
-
-def scan_num(id)
-  id[/scan=(\d+)/,1].to_i
+  def mz_view_chromatogram_with_colors
+    _ints = centroids.map do |centroid|
+      intensity = centroid.intensity
+      @color_log_base ? Math.log(intensity, @color_log_base) : intensity
+    end
+    [times, mzs, _ints]
+  end
 end
 
 # returns xics
@@ -108,7 +112,7 @@ def sequential(mzml, xics)
   searching = xics.dup
   mzml.each do |spectrum|
     next unless spectrum.ms_level == 1
-    scan_num = scan_num(spectrum.id)
+    scan_num = spectrum.id[/scan=(\d+)/,1].to_i
     rt = spectrum.retention_time
     finished = []
     matching = searching.select do |xic|
@@ -127,7 +131,7 @@ def sequential(mzml, xics)
         map do |mz, int|
           Centroid.new(scan_num, rt, mz, int)
         end
-      xic.centroids.push(*centroids)
+        xic.centroids.push(*centroids)
     end
 
     searching -= finished
@@ -156,8 +160,9 @@ parser = OptionParser.new do |op|
   end
   op.on("-m", "--mz-window <m/z>", Float, "a global m/z window") {|v| opt.mz_window = v }
   op.on("-s", "--sequential", "do a sequential search instead of binary search", "can be faster if lots of windows") {|v| opt.sequential = v }
+  op.on("--color-log <Float>", Float, "use log transformed values for color") {|v| opt.color_log = v }
   op.on("--multiplot", "plot everything together to <#{outfilebase}>.svg") {|v| opt.multiplot = outfilebase + ".svg" }
-  op.on("--plot-size <W,H>", "width, height of each plot") {|v| opt.plot_size = v }
+  op.on("--plot-size <W,H>", "width, height of each plot (#{opt.plot_size})") {|v| opt.plot_size = v }
   op.on("-v", "--verbose", "talk about it") {|v| $VERBOSE = 5 }
 end
 parser.parse!
@@ -198,6 +203,7 @@ width = filenames.size * opt.plot_size.first
 height = opt.windows.size * opt.plot_size.last
 
 xics = xic_set.flatten(1)
+xics.each {|xic| xic.color_log_base = opt.color_log } if opt.color_log
 
 if opt.multiplot
   putsv "plotting"
@@ -207,8 +213,19 @@ if opt.multiplot
     Gnuplot::Multiplot.new(gp, layout: [opt.windows.size, filenames.size]) do |mp|
       xics.group_by(&:window).each do |window, xics_by_window|
         max_group_intensity = xics_by_window.map {|xic| xic.intensities.max }.max.ceil
+        color_range_max = 
+          if opt.color_log
+            Math.log(max_group_intensity, opt.color_log) 
+          else
+            max_group_intensity
+          end
+
         filenames.map {|filename| xics_by_window.find {|xic| xic.filename == filename } }.each do |xic|
           Gnuplot::Plot.new(mp) do |plot|
+            #plot.palette "model XYZ rgbformulae -7,-22,-23"
+            plot.palette "model XYZ rgbformulae -10,-22,-23"
+            plot.cbrange "[0:#{color_range_max}]"
+            plot.unset "colorbox"
             plot.title "#{xic.window} #{xic.filename}"
             plot.xlabel "time (s)"
             plot.ylabel "intensity"
@@ -222,10 +239,10 @@ if opt.multiplot
               ds.with = "lines"
               ds.title = "ion intensity"
             end
-            plot.data << Gnuplot::DataSet.new( xic.mz_view_chromatogram) do |ds|
+            plot.data << Gnuplot::DataSet.new( xic.mz_view_chromatogram_with_colors) do |ds|
               ds.axes = "x1y2"
               ds.title = "m/z"
-              ds.with = "points pt 7 ps 0.25"
+              ds.with = "points pt 7 ps 0.3 palette"
             end
           end
         end
