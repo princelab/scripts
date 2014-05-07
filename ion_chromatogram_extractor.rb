@@ -137,6 +137,8 @@ if opt.screen || opt.svg_outfile
             plot.xlabel "time (s)"
             plot.ylabel "intensity"
             plot.y2label "m/z"
+            plot.ytics "nomirror"
+            plot.y2tics
             plot.data << Gnuplot::DataSet.new( ec.ion_chromatogram ) do |ds|
               ds.axes = "x1y1"
               ds.with = "lines"
