@@ -21,6 +21,7 @@ Window = Struct.new(:mz_range, :time_range) do
     "#{mz_range.begin}:#{mz_range.end}mz,#{time_range.begin}:#{time_range.end}(s)"
   end
 end
+
 Centroid = Struct.new(:scan_num, :time, :mz, :intensity) do
   def to_s
     "<#{scan_num}:#{time}(s) #{mz}m/z #{intensity}>"
