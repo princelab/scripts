@@ -146,24 +146,24 @@ end
 
 progname = File.basename(__FILE__)
 
-outfilebase = progname.chomp(".rb")
 opt = OpenStruct.new( 
-                     outfile:  outfilebase + ".csv", 
                      windows: [],
                      plot_size: "600,300",
+                     sequential: true,
                     )
 parser = OptionParser.new do |op|
   op.banner = "usage: #{progname} [OPTS] <file>.mzML ..."
-  op.separator "quantifies given windows across the files"
-  op.on("-o", "--outfile <#{opt.outfile}>", "name of outputfile") {|v| opt.outfile = v }
-  op.on("-w", "--window <m:m,t:t>", "mz_start:mz_end,time_st:time_end", "call multiple times for many windows", "<m,t:t> to apply --mz-window") do |v|
+  op.separator "KEY OPTIONS:"
+  op.on("-q", "--quantfile <filename>", "write quantitation to given csv filename") {|v| opt.quantfile = v }
+  op.on("-m", "--multiplot <filename>", "plot windows to filename as svg") {|v| opt.multiplot = v }
+  op.on("-w", "--window <m:m,t:t>", "mz_start:mz_end[,time_st:time_end]", "call multiple times for many windows", "<m,t:t> to apply --mz-window", "leave off time and get entire chromatogram") do |v|
     opt.windows << v
   end
-  op.on("-m", "--mz-window <m/z>", Float, "a global m/z window") {|v| opt.mz_window = v }
-  op.on("-s", "--sequential", "do a sequential search instead of binary search", "can be faster if lots of windows") {|v| opt.sequential = v }
-  op.on("--color-log <Float>", Float, "use log transformed values for color") {|v| opt.color_log = v }
-  op.on("--multiplot", "plot everything together to <#{outfilebase}>.svg") {|v| opt.multiplot = outfilebase + ".svg" }
+  op.on("-g", "--global-mz-window <m/z>", Float, "a global m/z window", "applied to every window w/ single m/z") {|v| opt.global_mz_window = v }
+  op.separator ""
+  op.separator "OTHER OPTIONS:"
   op.on("--plot-size <W,H>", "width, height of each plot (#{opt.plot_size})") {|v| opt.plot_size = v }
+  op.on("--color-log <Float>", Float, "use log transformed values for color") {|v| opt.color_log = v }
   op.on("-v", "--verbose", "talk about it") {|v| $VERBOSE = 5 }
 end
 parser.parse!
@@ -180,9 +180,15 @@ opt.windows.map! do |string|
       mz_string.split(':').map(&:to_f)
     else
       mz_val = mz_string.to_f
-      [mz_val - opt.mz_window, mz_val + opt.mz_window]
+      [mz_val - opt.global_mz_window, mz_val + opt.global_mz_window]
     end
-  Window.new(Range.new(*mz_range_vals), Range.new(*time_string.split(':').map(&:to_f)) )
+  time_vals = 
+    if time_string
+      time_string.split(':').map(&:to_f)
+    else
+      [0, Float::INFINITY]
+    end
+  Window.new(Range.new(*mz_range_vals), Range.new(*time_vals) )
 end
 
 opt.plot_size = opt.plot_size.split(',').map(&:to_i)
@@ -252,9 +258,9 @@ if opt.multiplot
   end
 end
 
-if opt.outfile
-  headers = %i(filename mz_start mz_end time_start time_end ion_count)
-  CSV.open(opt.outfile, 'wb') do |csv|
+if opt.quantfile
+  headers = %w(filename mz_start mz_end time_start time_end ion_count).map(&:to_sym)
+  CSV.open(opt.quantfile, 'wb') do |csv|
     csv << headers
     xics.each do |xic|
       csv << headers.map {|key| xic.send(key) }
