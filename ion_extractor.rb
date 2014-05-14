@@ -1,13 +1,29 @@
 #!/usr/bin/env ruby
 
+progname = File.basename(__FILE__)
+
 require 'optparse'
-require 'mspire/mzml'
 require 'ostruct'
-require 'gnuplot/multiplot'
 require 'csv'
+require 'stringio'
+begin
+  require 'andand'
+  require 'mspire/mzml'
+  require 'gnuplot/multiplot'
+rescue
+  puts "to run #{progname} you need the following gems: "
+  puts "    gnuplot-multiplot (also install gnuplot the program), andand, and mspire!"
+  puts "to install the gems:"
+  puts "    gem install gnuplot-multiplot andand mspire"
+  exit
+end
 
 def putsv(*args)
   puts *args if $VERBOSE
+end
+
+module Gnuplot
+  INFINITY = 1e30
 end
 
 class Range
@@ -66,6 +82,14 @@ class ExtractedChromatogram
 
   def time_end
     time_range.end
+  end
+
+  def min_time
+    centroids.first.andand.time
+  end
+
+  def max_time
+    centroids.last.andand.time
   end
 
   def times
@@ -144,8 +168,6 @@ def sequential(mzml, xics)
   xics
 end
 
-progname = File.basename(__FILE__)
-
 opt = OpenStruct.new( 
                      windows: [],
                      plot_size: "600,300",
@@ -156,7 +178,7 @@ parser = OptionParser.new do |op|
   op.separator "KEY OPTIONS:"
   op.on("-q", "--quantfile <filename>", "write quantitation to given csv filename") {|v| opt.quantfile = v }
   op.on("-m", "--multiplot <filename>", "plot windows to filename as svg") {|v| opt.multiplot = v }
-  op.on("-w", "--window <m:m,t:t>", "mz_start:mz_end[,time_st:time_end]", "call multiple times for many windows", "<m,t:t> to apply --mz-window", "leave off time and get entire chromatogram") do |v|
+  op.on("-w", "--window <m:m,t:t>", "mz_start:mz_end[,time_st:time_end]", "call multiple times for many windows", "<m,t:t> to apply --mz-window", "leave off times (or end time)", "to get entire chromatogram") do |v|
     opt.windows << v
   end
   op.on("-g", "--global-mz-window <m/z>", Float, "a global m/z window", "applied to every window w/ single m/z") {|v| opt.global_mz_window = v }
@@ -164,11 +186,12 @@ parser = OptionParser.new do |op|
   op.separator "OTHER OPTIONS:"
   op.on("--plot-size <W,H>", "width, height of each plot (#{opt.plot_size})") {|v| opt.plot_size = v }
   op.on("--color-log <Float>", Float, "use log transformed values for color") {|v| opt.color_log = v }
+  op.on("--gnuplot-file <filename>", "write gnuplot commands to specified file") {|v| opt.gnuplot_file = v }
   op.on("-v", "--verbose", "talk about it") {|v| $VERBOSE = 5 }
 end
 parser.parse!
 
-if ARGV.size == 0 || opt.windows.size == 0
+if ARGV.size == 0 || opt.windows.size == 0 || (!opt.quantfile && !opt.multiplot)
   puts parser
   exit
 end
@@ -182,9 +205,10 @@ opt.windows.map! do |string|
       mz_val = mz_string.to_f
       [mz_val - opt.global_mz_window, mz_val + opt.global_mz_window]
     end
-  time_vals = 
+  time_vals =
     if time_string
-      time_string.split(':').map(&:to_f)
+      (start_time, end_time) = time_string.split(':').map(&:to_f)
+      [start_time, end_time || Float::INFINITY]
     else
       [0, Float::INFINITY]
     end
@@ -214,12 +238,20 @@ xics.each {|xic| xic.color_log_base = opt.color_log } if opt.color_log
 
 if opt.multiplot
   putsv "plotting"
-  Gnuplot.open do |gp|
+  plot_it = ->(gp) do
     gp << "set term svg noenhanced size #{width},#{height}\n"
     gp << %Q{set output "#{opt.multiplot}"\n}
     Gnuplot::Multiplot.new(gp, layout: [opt.windows.size, filenames.size]) do |mp|
       xics.group_by(&:window).each do |window, xics_by_window|
-        max_group_intensity = xics_by_window.map {|xic| xic.intensities.max }.max.ceil
+        max_group_intensity = xics_by_window.map {|xic| xic.intensities.max }.max.andand.ceil || 1.0
+        min_time = window.time_range.begin
+        max_time = window.time_range.end
+        if max_time == Float::INFINITY
+          # take the highest available time from a real data point
+          # will be nil if no data points
+          max_time = xics_by_window.map {|xic| xic.max_time }.max
+        end
+
         color_range_max = 
           if opt.color_log
             Math.log(max_group_intensity, opt.color_log) 
@@ -241,20 +273,39 @@ if opt.multiplot
             plot.ytics "nomirror"
             plot.y2tics
             plot.y2range window.mz_range.to_gplot
-            plot.data << Gnuplot::DataSet.new( xic.ion_chromatogram ) do |ds|
+            plot.xrange (min_time..(max_time || Gnuplot::INFINITY)).to_gplot
+            unless max_time
+              plot.xtics %Q{#{min_time},#{Gnuplot::INFINITY}}
+              plot.xtics %Q{add ("#{min_time}" #{min_time})}
+              plot.xtics %Q{add ("Infinity" #{Gnuplot::INFINITY})}
+            end
+            ion_chrmt = xic.ion_chromatogram
+            no_data = ion_chrmt.first.size == 0
+            ion_chrmt = [[min_time],[Gnuplot::INFINITY]] if no_data
+            plot.data << Gnuplot::DataSet.new( ion_chrmt ) do |ds|
               ds.axes = "x1y1"
               ds.with = "lines"
               ds.title = "ion intensity"
             end
-            plot.data << Gnuplot::DataSet.new( xic.mz_view_chromatogram_with_colors) do |ds|
-              ds.axes = "x1y2"
-              ds.title = "m/z"
-              ds.with = "points pt 7 ps 0.3 palette"
+            unless no_data
+              plot.data << Gnuplot::DataSet.new( xic.mz_view_chromatogram_with_colors) do |ds|
+                ds.axes = "x1y2"
+                ds.title = "m/z"
+                ds.with = "points pt 7 ps 0.3 palette"
+              end
             end
           end
         end
       end
     end
+  end
+  if opt.gnuplot_file
+    gp = StringIO.new
+    plot_it[gp]
+    gp.rewind
+    File.write(opt.gnuplot_file, gp.string)
+  else
+    Gnuplot.open {|gp| plot_it[gp] }
   end
 end
 
