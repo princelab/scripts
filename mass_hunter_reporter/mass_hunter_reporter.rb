@@ -302,6 +302,7 @@ module MassHunterReporter
     alias_attr :tgt_rt_diff, :tgt_retention_time_difference
     alias_attr :compound_label, :label
     alias_attr :name, :compound_name
+    # note that this is sometimes not found in the file
     alias_attr :pos_aaseq_mods_st, :notes
     alias_attr :score_db, :merged_id_overall_match_score
     alias_attr :filename, :data_file_name
@@ -313,13 +314,18 @@ module MassHunterReporter
     end
 
     # Returns a triplet: position as an int, aaseq (string), and mods (string).  (Once we know
-    # the delimiter we can set these as an array)
+    # the delimiter we can set these as an array).  If this is not set,
+    # returns nil for each of the three values.
     def pos_aaseq_mods
-      (pos_st, aaseq_plus_mods) = self.pos_aaseq_mods_st.split('+')
-      @aaseq_start_position = pos_st.to_i
+      if self.pos_aaseq_mods_st
+        (pos_st, aaseq_plus_mods) = self.pos_aaseq_mods_st.split('+')
+        @aaseq_start_position = pos_st.to_i
 
-      (@aaseq, @mod_st) = aaseq_plus_mods.split('-',2)
-      [@aaseq_start_position, @aaseq, @mod_st]
+        (@aaseq, @mod_st) = aaseq_plus_mods.split('-',2)
+        [@aaseq_start_position, @aaseq, @mod_st]
+      else
+        [nil,nil,nil]
+      end
     end
 
     # the pos (position) from pos_aaseq_mods
@@ -332,7 +338,7 @@ module MassHunterReporter
     end
 
     def mod_st
-      @mod_st || pos_aaseq_mods_st.last
+      @mod_st || pos_aaseq_mods.last
     end
 
     alias_method :sequence, :aaseq
