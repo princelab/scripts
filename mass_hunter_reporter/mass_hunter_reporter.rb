@@ -317,12 +317,22 @@ module MassHunterReporter
     # the delimiter we can set these as an array).  If this is not set,
     # returns nil for each of the three values.
     def pos_aaseq_mods
+      # possible values of pos_aaseq_mods_st:
+      # nil
+      # "562+CTSYPDGSWK-C:Carbamidomethylation"
+      # "259+MELERPGGNEITR-none"
+      # "206+"
+      
       if self.pos_aaseq_mods_st
         (pos_st, aaseq_plus_mods) = self.pos_aaseq_mods_st.split('+')
         @aaseq_start_position = pos_st.to_i
 
-        (@aaseq, @mod_st) = aaseq_plus_mods.split('-',2)
-        [@aaseq_start_position, @aaseq, @mod_st]
+        if aaseq_plus_mods
+          (@aaseq, @mod_st) = aaseq_plus_mods.split('-',2)
+          [@aaseq_start_position, @aaseq, @mod_st]
+        else
+          [@aaseq_start_position, @aaseq=nil, @mod_st=nil]
+        end
       else
         [nil,nil,nil]
       end
