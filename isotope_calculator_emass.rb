@@ -48,7 +48,7 @@ def read_emass_output(output, deuterium_pct=0.0)
 end
 
 def get_isotope_array
-  DATA.readlines("\r\n")
+  DATA.readlines.map {|line| line.chomp << "\r\n" }
 end
 
 isotope_array = get_isotope_array
@@ -111,9 +111,11 @@ mol_forms =
     ARGV.dup
   end
 
+  
+out = opt.outfile ? File.open(opt.outfile, 'w') : $stdout
+puts "writing to: #{opt.outfile}"
+
 mol_forms.each do |mol_form|
-  puts "writing to: #{opt.outfile}"
-  out = opt.outfile ? File.open(opt.outfile, 'w') : $stdout
   (opt.start..opt.stop).step(opt.step) do |deuterium_pct|
     file = mol_form + "Dpct_#{deuterium_pct}" + ".isotope_ratios.tmp"
     File.open(file, 'w') {|io| write_isotope_array(isotope_array, deuterium_pct, io) }
@@ -132,11 +134,12 @@ mol_forms.each do |mol_form|
         out.puts pair.join(", ")
       end
     end
-  out.close if opt.outfile
 end
+out.close if opt.outfile
 
 ## these are from ISOTOPE.DAT (originally from emass code) but altered to have
-#the neese ratios (see mspire library).
+# the neese ratios (see mspire library).
+# the original file uses \r\n, but this is \n
 __END__
 X  2
 1  0.9
@@ -654,4 +657,3 @@ No  1
 
 Lr  1
 260.0  1.0
-
