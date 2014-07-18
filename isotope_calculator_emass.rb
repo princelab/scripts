@@ -138,11 +138,12 @@ parser = OptionParser.new do |op|
   op.on("-o", "--outfile <fname>", "write to outfile") {|v| opt.outfile = v }
   op.on("-i", "--infile <fname>", "use an input file, one formula per line") {|v| opt.infile = v }
   op.on("-n", "--normalize", "normalize ratios to one") {|v| opt.normalize = v }
-  op.on("--start <#{opt.start}>", Float, "deuterium start") {|v| opt.start = v }
-  op.on("--stop <#{opt.stop}>", Float, "deuterium stop") {|v| opt.stop = v }
-  op.on("--step <#{opt.step}>", Float, "deuterium step") {|v| opt.step = v }
   op.on("--element-x <Abbrev>", "which element 'X' replaces, def: #{opt.element_x}", "(should only use 2 isotope elements right now)") {|v| opt.element_x = v }
+  op.on("--write-isotopes", "writes ISOTOPES.DAT file and exits") {|v| File.write('ISOTOPES.DAT', isotope_array.join) ; exit}
   op.on("--isotope-x <Int>" , Integer, "index (zero based) of isotope X, def: #{opt.isotope_x}", "(right now really should only use 1)") {|v| opt.isotope_x = v }
+  op.on("--start <#{opt.start}>", Float, "X element start") {|v| opt.start = v }
+  op.on("--stop <#{opt.stop}>", Float, "X element stop") {|v| opt.stop = v }
+  op.on("--step <#{opt.step}>", Float, "X element step") {|v| opt.step = v }
 end
 parser.parse!
 
