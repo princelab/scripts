@@ -31,7 +31,8 @@ require 'ostruct'
 require 'tempfile'
 
 # masses and ratios are parallel arrays
-IsotopeDist = Struct.new(:formula, :charge, :limit, :masses, :ratios, :deuterium_pct)
+# isotope_num is zero indexed (e.g., deuterium would be 1):w
+IsotopeDist = Struct.new(:formula, :charge, :limit, :masses, :ratios, :element, :isotope_num, :x_pct)
 Element = Struct.new(:abbrev, :isotope_infos)
 IsotopeInfo = Struct.new(:mass, :abundance)
 
@@ -53,9 +54,9 @@ class IsotopeArray < Array
   def new_isotope_array(element)
     n_arr = self.dup
     index = n_arr.index {|line| line[0,element.abbrev.size] == element.abbrev }
-    n_arr[index] = "#{element.abbrev} #{element.isotope_infos.size}"
+    n_arr[index] = "#{element.abbrev} #{element.isotope_infos.size}\r\n"
     element.isotope_infos.each_with_index do |i_info, i|
-      n_arr[index+1+i] = i_info.to_a.join(' ')
+      n_arr[index+1+i] = i_info.to_a.join(' ') << "\r\n"
     end
     n_arr
   end
@@ -67,7 +68,7 @@ end
 
 class Emass
 
-  def self.isotope_distribution(mol_form, isotope_array, deuterium_pct)
+  def self.isotope_distribution(mol_form, isotope_array, opt, x_pct)
     tmpfile = Tempfile.new("isotope_array")
     isotope_array.write(tmpfile)
     tmpfile.close
@@ -78,11 +79,11 @@ class Emass
       isotope_output = stdout.read
     end
     tmpfile.unlink
-    Emass.read_output(isotope_output, deuterium_pct)
+    Emass.read_output(isotope_output, opt, x_pct)
   end
 
   # returns an IsotopeDist object
-  def self.read_output(output, deuterium_pct=0.0)
+  def self.read_output(output, opt, x_pct=0.0)
     lines = output.split(/\r?\n/)
     header = lines.shift
     (formula, charge, limit) = header.match(/formula: ([\w\d]+) charge : ([\d\+\-]+) limit: ([\w\d\.e\+\-]+)/).captures
@@ -93,11 +94,11 @@ class Emass
       masses << m.to_f
       ratios << r.to_f
     end
-    IsotopeDist.new(formula, charge, limit, masses, ratios, deuterium_pct)
+    IsotopeDist.new(formula, charge, limit, masses, ratios, opt.element_x, opt.isotope_x, x_pct)
   end
 
   def self.write_to_csv(io, isotope_dist, opt)
-    io.puts [:formula, :charge, :limit, :deuterium_pct].flat_map {|v| ["#{v}:", isotope_dist.send(v)] }.join(", ")
+    io.puts [:formula, :charge, :limit, :element, :isotope_num, :x_pct].flat_map {|v| ["#{v}:", isotope_dist.send(v)] }.join(", ")
 
     ratios = opt.normalize ? normalize(isotope_dist.ratios) : isotope_dist.ratios
     isotope_dist.masses.zip(ratios) do |pair|
@@ -112,20 +113,20 @@ def normalize(ratios)
   ratios.map {|v| v / sum }
 end
 
-def calculate_deuterium_fractions(deuterium_pct, deuterium_fraction)
-  new_deut_frac = (deuterium_pct + (100.0 - deuterium_pct) * deuterium_fraction) / 100
-  new_hydrogen_frac = 1.0 - new_deut_frac
-  [new_hydrogen_frac, new_deut_frac]
+# this *only* works for elements with two isotopes right now!!! (e.g., H or C)
+# also *only* works for isotope 1 right now! (where 0 is the first)
+def calculate_x_fractions(x_pct, x_fraction)
+  modified_x_frac = (x_pct + (100.0 - x_pct) * x_fraction) / 100
+  other_isotope_frac = 1.0 - modified_x_frac
+  [other_isotope_frac, modified_x_frac]
 end
-
 
 isotope_array = IsotopeArray.new(DATA)
 
-opt = OpenStruct.new( start: 0.0, stop: 5.0, step: 0.2 )
+opt = OpenStruct.new( start: 0.0, stop: 5.0, step: 0.2, element_x: 'H', isotope_x: 1)
 
 parser = OptionParser.new do |op|
   op.banner = "usage: #{File.basename(__FILE__)} <MolFormula> ..."
-  op.separator "use X for deuterium"
   op.separator "output: csv header line, then masses and ratios, one per line"
   op.separator ""
   op.separator "notes:"
@@ -140,6 +141,8 @@ parser = OptionParser.new do |op|
   op.on("--start <#{opt.start}>", Float, "deuterium start") {|v| opt.start = v }
   op.on("--stop <#{opt.stop}>", Float, "deuterium stop") {|v| opt.stop = v }
   op.on("--step <#{opt.step}>", Float, "deuterium step") {|v| opt.step = v }
+  op.on("--element-x <Abbrev>", "which element 'X' replaces, def: #{opt.element_x}", "(should only use 2 isotope elements right now)") {|v| opt.element_x = v }
+  op.on("--isotope-x <Int>" , Integer, "index (zero based) of isotope X, def: #{opt.isotope_x}", "(right now really should only use 1)") {|v| opt.isotope_x = v }
 end
 parser.parse!
 
@@ -158,19 +161,19 @@ mol_forms =
 out = opt.outfile ? File.open(opt.outfile, 'w') : $stdout
 puts "writing to: #{opt.outfile}"
 
-Hydrogen = isotope_array.get_element('H')
-p Hydrogen
+XElement = isotope_array.get_element(opt.element_x)
 
 mol_forms.each do |mol_form|
-  (opt.start..opt.stop).step(opt.step) do |deuterium_pct|
-    deuterium_fractions = calculate_deuterium_fractions(deuterium_pct, Hydrogen.isotope_infos.last.abundance)
+  (opt.start..opt.stop).step(opt.step) do |x_pct|
+    deuterium_fractions = calculate_x_fractions(x_pct, XElement.isotope_infos[opt.isotope_x].abundance)
     isotope_infos = [
-      IsotopeInfo.new(Hydrogen.isotope_infos.first.mass, deuterium_fractions.first),
-      IsotopeInfo.new(Hydrogen.isotope_infos.last.mass, deuterium_fractions.last),
+      *(0..1).map do |i|
+        IsotopeInfo.new(XElement.isotope_infos[i].mass, deuterium_fractions[i])
+      end
     ]
     element_x = Element.new('X', isotope_infos)
     new_is_arr = isotope_array.new_isotope_array(element_x)
-    isotope_dist = Emass.isotope_distribution(mol_form, new_is_arr, deuterium_pct)
+    isotope_dist = Emass.isotope_distribution(mol_form, new_is_arr, opt, x_pct)
     Emass.write_to_csv(out, isotope_dist, opt)
   end
 end
