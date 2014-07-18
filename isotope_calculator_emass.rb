@@ -28,49 +28,83 @@ THE SOFTWARE.
 require 'optparse'
 require 'open3'
 require 'ostruct'
+require 'tempfile'
 
 # masses and ratios are parallel arrays
 IsotopeDist = Struct.new(:formula, :charge, :limit, :masses, :ratios, :deuterium_pct)
+Element = Struct.new(:abbrev, :isotope_infos)
+IsotopeInfo = Struct.new(:mass, :abundance)
 
-# returns an IsotopeDist object
-def read_emass_output(output, deuterium_pct=0.0)
-  lines = output.split(/\r?\n/)
-  header = lines.shift
-  (formula, charge, limit) = header.match(/formula: ([\w\d]+) charge : ([\d\+\-]+) limit: ([\w\d\.e\+\-]+)/).captures
-  masses = []
-  ratios = []
-  lines.each do |line| 
-    (m,r) = line.split(' ')
-    masses << m.to_f
-    ratios << r.to_f
+class IsotopeArray < Array
+  def initialize(io)
+    super(io.readlines.map {|line| line.chomp << "\r\n" })
   end
-  IsotopeDist.new(formula, charge, limit, masses, ratios, deuterium_pct)
-end
 
-def get_isotope_array
-  DATA.readlines.map {|line| line.chomp << "\r\n" }
-end
-
-isotope_array = get_isotope_array
-HYDROGEN_START_INDEX = isotope_array.index {|line| line[0] == 'H' }
-DEUTERIUM_FRACTION = isotope_array[6].chomp.split(' ').last.to_f
-
-# returns the hydrogen fraction and deuterium fraction given a deuterium
-# percentage
-def calculate_deuterium_fractions(deuterium_pct)
-  new_deut_frac = (deuterium_pct + (100.0 - deuterium_pct) * DEUTERIUM_FRACTION) / 100
-  new_hydrogen_frac = 1.0 - new_deut_frac
-  [new_hydrogen_frac, new_deut_frac]
-end
-
-def write_isotope_array(isotope_array, deuterium_pct, io)
-  new_array = isotope_array.dup
-  (hydr, deut) = calculate_deuterium_fractions(deuterium_pct)
-  [1,2].zip([hydr, deut]) do |i, fraction|
-    mass_num_st = isotope_array[HYDROGEN_START_INDEX+i].split(" ").first 
-    new_array[HYDROGEN_START_INDEX+i] = "#{mass_num_st} #{fraction}\r\n"
+  def get_element(element)
+    index = self.index {|line| line[0,element.size] == element }
+    (el, num_isotope_infos) = self[index].split(' ')
+    element = Element.new(el)
+    element.isotope_infos = num_isotope_infos.to_i.times.map do |i|
+      IsotopeInfo.new(*self[index+1+i].split(' ').map(&:to_f))
+    end
+    element
   end
-  io.write(new_array.join)
+
+  def new_isotope_array(element)
+    n_arr = self.dup
+    index = n_arr.index {|line| line[0,element.abbrev.size] == element.abbrev }
+    n_arr[index] = "#{element.abbrev} #{element.isotope_infos.size}"
+    element.isotope_infos.each_with_index do |i_info, i|
+      n_arr[index+1+i] = i_info.to_a.join(' ')
+    end
+    n_arr
+  end
+
+  def write(io)
+    io << self.join
+  end
+end
+
+class Emass
+
+  def self.isotope_distribution(mol_form, isotope_array, deuterium_pct)
+    tmpfile = Tempfile.new("isotope_array")
+    isotope_array.write(tmpfile)
+    tmpfile.close
+    isotope_output = nil
+    Open3.popen3("emass -i #{tmpfile.path}") do |stdin, stdout, stderr, wait_thr|
+      stdin.write("#{mol_form}\n")
+      stdin.close_write
+      isotope_output = stdout.read
+    end
+    tmpfile.unlink
+    Emass.read_output(isotope_output, deuterium_pct)
+  end
+
+  # returns an IsotopeDist object
+  def self.read_output(output, deuterium_pct=0.0)
+    lines = output.split(/\r?\n/)
+    header = lines.shift
+    (formula, charge, limit) = header.match(/formula: ([\w\d]+) charge : ([\d\+\-]+) limit: ([\w\d\.e\+\-]+)/).captures
+    masses = []
+    ratios = []
+    lines.each do |line| 
+      (m,r) = line.split(' ')
+      masses << m.to_f
+      ratios << r.to_f
+    end
+    IsotopeDist.new(formula, charge, limit, masses, ratios, deuterium_pct)
+  end
+
+  def self.write_to_csv(io, isotope_dist, opt)
+    io.puts [:formula, :charge, :limit, :deuterium_pct].flat_map {|v| ["#{v}:", isotope_dist.send(v)] }.join(", ")
+
+    ratios = opt.normalize ? normalize(isotope_dist.ratios) : isotope_dist.ratios
+    isotope_dist.masses.zip(ratios) do |pair|
+      io.puts pair.join(", ")
+    end
+  end
+
 end
 
 def normalize(ratios)
@@ -78,10 +112,20 @@ def normalize(ratios)
   ratios.map {|v| v / sum }
 end
 
+def calculate_deuterium_fractions(deuterium_pct, deuterium_fraction)
+  new_deut_frac = (deuterium_pct + (100.0 - deuterium_pct) * deuterium_fraction) / 100
+  new_hydrogen_frac = 1.0 - new_deut_frac
+  [new_hydrogen_frac, new_deut_frac]
+end
+
+
+isotope_array = IsotopeArray.new(DATA)
+
 opt = OpenStruct.new( start: 0.0, stop: 5.0, step: 0.2 )
 
 parser = OptionParser.new do |op|
   op.banner = "usage: #{File.basename(__FILE__)} <MolFormula> ..."
+  op.separator "use X for deuterium"
   op.separator "output: csv header line, then masses and ratios, one per line"
   op.separator ""
   op.separator "notes:"
@@ -111,29 +155,24 @@ mol_forms =
     ARGV.dup
   end
 
-  
 out = opt.outfile ? File.open(opt.outfile, 'w') : $stdout
 puts "writing to: #{opt.outfile}"
 
+Hydrogen = isotope_array.get_element('H')
+p Hydrogen
+
 mol_forms.each do |mol_form|
   (opt.start..opt.stop).step(opt.step) do |deuterium_pct|
-    file = mol_form + "Dpct_#{deuterium_pct}" + ".isotope_ratios.tmp"
-    File.open(file, 'w') {|io| write_isotope_array(isotope_array, deuterium_pct, io) }
-    isotope_output = nil
-    Open3.popen3("emass -i #{file}") do |stdin, stdout, stderr, wait_thr|
-      stdin.write("#{mol_form}\n")
-      stdin.close_write
-      isotope_output = stdout.read
-    end
-    isotope_dist = read_emass_output(isotope_output, deuterium_pct)
-    File.unlink(file)
-      out.puts [:formula, :charge, :limit, :deuterium_pct].flat_map {|v| ["#{v}:", isotope_dist.send(v)] }.join(", ")
-      
-      ratios = opt.normalize ? normalize(isotope_dist.ratios) : isotope_dist.ratios
-      isotope_dist.masses.zip(ratios) do |pair|
-        out.puts pair.join(", ")
-      end
-    end
+    deuterium_fractions = calculate_deuterium_fractions(deuterium_pct, Hydrogen.isotope_infos.last.abundance)
+    isotope_infos = [
+      IsotopeInfo.new(Hydrogen.isotope_infos.first.mass, deuterium_fractions.first),
+      IsotopeInfo.new(Hydrogen.isotope_infos.last.mass, deuterium_fractions.last),
+    ]
+    element_x = Element.new('X', isotope_infos)
+    new_is_arr = isotope_array.new_isotope_array(element_x)
+    isotope_dist = Emass.isotope_distribution(mol_form, new_is_arr, deuterium_pct)
+    Emass.write_to_csv(out, isotope_dist, opt)
+  end
 end
 out.close if opt.outfile
 
